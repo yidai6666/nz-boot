@@ -71,7 +71,7 @@ sleep 2
 log "启动 cloudflared 隧道"
 /opt/cfd tunnel --no-autoupdate --protocol http2 run --token "$ARGO_AUTH" 2>&1 &
 # ---------- 6. 前端坏状态一键修复入口 /heal ----------
-cat > /usr/share/nginx/html/heal.html <<'HEALEOF'
+cat > /etc/nginx/heal.html <<'HEALEOF'
 <!doctype html><html lang="zh-CN"><meta charset="utf-8"><title>正在修复面板…</title>
 <style>body{font:16px/1.7 system-ui,-apple-system,"PingFang SC",sans-serif;background:#0b1020;color:#e6edf3;display:flex;align-items:center;justify-content:center;min-height:100vh;margin:0}div{text-align:center;max-width:560px;padding:28px}b{color:#7ee787}a{color:#7ee787}</style>
 <div><b id=t>正在清理坏的页面状态…</b><p id=s>请稍候，1~3 秒后自动进入管理后台，不需要重新输密码。</p></div>
@@ -91,12 +91,18 @@ HEALEOF
 
 cat > /docker-entrypoint.d/99-heal.sh <<'EOS'
 #!/bin/sh
-# 在 nginx 模板渲染之后，把 /heal 修复入口挂进 server 块
+# 在 nginx 模板渲染后，把 /heal 修复入口挂进 server 块
 F=/etc/nginx/conf.d/default.conf
 [ -f "$F" ] || exit 0
 grep -q 'location = /heal' "$F" && exit 0
-awk '{print} /^[ \t]*server[ \t]*\{/ && !d {print "    location = /heal { default_type text/html; root /usr/share/nginx/html; try_files /heal.html =404; }"; d=1}' "$F" > /tmp/nc.$$ && mv /tmp/nc.$$ "$F"
-if nginx -t >/dev/null 2>&1; then echo "[heal] /heal 已注入"; else echo "[heal] !! 注入失败，还原"; fi
+cp "$F" /tmp/default.conf.bak
+awk '{print} /^[ \t]*server[ \t]*\{/ && !d {print "    location = /heal { default_type text/html; alias /etc/nginx/heal.html; }"; d=1}' "$F" > /tmp/nc.$$ && mv /tmp/nc.$$ "$F"
+if nginx -t >/dev/null 2>&1; then
+  echo "[heal] /heal 已注入"
+else
+  echo "[heal] !! 注入失败，已还原"
+  cp /tmp/default.conf.bak "$F"
+fi
 EOS
 chmod +x /docker-entrypoint.d/99-heal.sh
 log "已准备 /heal 一键修复入口"
